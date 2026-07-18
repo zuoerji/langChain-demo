@@ -38,7 +38,7 @@ const initialApiState: ApiState = {
 const tabs: Array<{ id: TabId; label: string; icon: typeof MessageSquareText }> = [
   { id: "chat", label: "基础聊天", icon: MessageSquareText },
   { id: "stream", label: "流式输出", icon: Radio },
-  // { id: "tools", label: "工具调用", icon: Hammer },
+  { id: "tools", label: "工具调用", icon: Hammer },
   // { id: "rag", label: "RAG 问答", icon: Database },
   // { id: "graph", label: "工作流", icon: GitBranch },
   // { id: "approval", label: "人工审批", icon: Workflow },
@@ -232,7 +232,7 @@ function ToolsDemo() {
           <div className="button-row">
             <ActionButton onClick={() => run(() => postJson("/api/lc/tools/ask", { input }))}>
               <Send size={16} />
-              自动选择工具
+              查询订单工具
             </ActionButton>
             <ActionButton
               variant="secondary"

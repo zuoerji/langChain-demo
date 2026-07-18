@@ -6,11 +6,11 @@
 */
 import { Router } from "express";
 import { asyncRoutes } from '../shared/async-route.js';
-import { threadInputSchema } from '../shared/validation.js';
+import { threadInputSchema, expressionSchema } from '../shared/validation.js';
 import { getChatModel } from '../ai/models.js';
-import { HumanMessage } from "@langchain/core/messages";
+import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
-import { formateConveration } from "../ai/tools.js";
+import { formateConveration, guessToolCall, tools, formatTools } from "../ai/tools.js";
 
 import { endSse, openSse, sendSse } from '../ai/sse.js';
 
@@ -134,5 +134,92 @@ langchanRouter.post(
       });
       res.end();
     }
+  })
+)
+/**
+ * 调用工具
+ * 1. 用户输入
+ *  1. 匹配用户输入，查询字段
+ *    1. 调用自己内部工具
+ *  2. 匹配不到，直接调用大模型
+ *  
+ * 
+*/
+langchanRouter.post(
+  '/tools/ask',
+  asyncRoutes(async (req, res) => {
+    /**
+     * 1. 匹配： 正则
+     * 2. 匹配到了之后，调用工具
+     * 3. 把用户输入的信息，和工具调用的结果，一起给到大模型
+     * 
+    */
+    const body = threadInputSchema.parse(req.body);
+    // 函数正则去匹配用户输入  订单 1001 -> 订单号：1001 需要调哪个工具
+    const call = guessToolCall(body.input);
+    // 没有匹配到 直接调用大模型
+    if (!call) {
+      const result = await getChatModel().invoke([
+        new SystemMessage("正常回答，这个请求不需要工具"),
+        new HumanMessage(body.input),
+      ]);
+      res.json({
+        ok: true,
+        data: {
+          mode: 'chat',
+          output: result.content
+        }
+      });
+      return;
+    }
+    // 匹配到了，调用工具
+    // call -> { toolName, args: { orderId } }
+    const selectTool = tools.find(demoTool => demoTool.toolName === call.toolName );
+    const toolResult = await selectTool?.invoke(call.args);
+    const result = await getChatModel().invoke([
+      new SystemMessage("使用提供的工具结果，简洁的方式回答用户"),
+      new HumanMessage(`用户请求：${body.input}\n 工具结果：${JSON.stringify(toolResult)}`)
+    ]);
+    res.json({
+      ok: true,
+      data: {
+        mode: 'tool',
+        output: result.content
+      }
+    })
+  })
+)
+
+
+// 调用计算器
+/**
+ * 1. 验证用户输入
+ * 2. 调用工具
+ * 
+*/
+langchanRouter.post(
+  '/tools/calculator',
+  asyncRoutes(async (req, res) => {
+    const body = expressionSchema.parse(req.body);
+    const calculator = tools.find(demoTool => demoTool.toolName === 'calculator');
+    const result = await calculator.invoke({ expression: body.expression });
+
+    res.json({
+      ok: true,
+      data: result
+    })
+  })
+)
+// 直接返回 tools
+// 处理成字符串返回
+langchanRouter.get(
+  '/tools',
+  asyncRoutes(async (req, res) => {
+    res.json({
+      ok: true,
+      data: {
+        output: formatTools(tools)
+      }
+    })
   })
 )
