@@ -6,13 +6,16 @@
 */
 import { Router } from "express";
 import { asyncRoutes } from '../shared/async-route.js';
-import { threadInputSchema, expressionSchema } from '../shared/validation.js';
+import { threadInputSchema, expressionSchema, ragInputSchema, ragQueryInputSchema } from '../shared/validation.js';
 import { getChatModel } from '../ai/models.js';
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 
 import { formateConveration, guessToolCall, tools, formatTools } from "../ai/tools.js";
 
 import { endSse, openSse, sendSse } from '../ai/sse.js';
+
+import { addDocument, listDocuments, searchDocuments  } from "../ai/rag-store.js";
+
 
 
 export const langchanRouter = Router();
@@ -223,3 +226,53 @@ langchanRouter.get(
     })
   })
 )
+
+//导入数据
+/**
+ * 1. 导入数据
+ *  1. 存储
+ *  2. 数据进行分词 我叫左耳 -> 我 | 叫 | 左 | 耳
+ *      我叫左耳 -> 我 | 叫 | 左 | 耳
+ *  3. 返回当前的数据和已经存进去的数据
+ * 
+*/
+langchanRouter.post(
+  '/rag/ingest',
+  asyncRoutes(async (req, res) => {
+    // 限制用户输入
+    const body = ragInputSchema.parse(req.body);
+    // 直接输出 当前添加的数据|历史所有数据
+    res.json({
+      ok: true,
+      document: addDocument(body.title, body.content),
+      allDocuments: listDocuments()
+    })
+  })
+)
+
+// 提问
+langchanRouter.post(
+  '/rag/query',
+  asyncRoutes(async (req, res) => {
+    // 验证用户输入
+    const body = ragQueryInputSchema.parse(req.body);
+    // 需要给 传入 用户输入的问题和数据库里面的 tokens 做打分
+    const hits = searchDocuments(body.question, body.topK);
+    // [{ title, content}]
+    const context = hits.map(hit => `[${hit.title}]\n ${hit.content}`).join('\n\n');
+    // 给大模型
+    const result = await getChatModel().invoke([
+      new SystemMessage("仅根据所提供的上下文来回到用户，如果上下文信息不足，请如实相告"),
+      new HumanMessage(`问题：${body.question}\n\n内容：${context}`),
+    ])
+
+    res.json({
+      ok: true,
+      data: {
+        question: body.question,
+        output: result.content,
+        hits
+      }
+    })
+  })
+) 
