@@ -51,11 +51,12 @@ app.use((error, req, res, next) => {
     });
     return;
   }
-
+  console.log(error,'error')
   res.status(500).json({
     ok: false,
     error: "服务器错误",
-    message: "服务器错误"
+    message: "服务器错误",
+    error: error.message
   });
 })
 

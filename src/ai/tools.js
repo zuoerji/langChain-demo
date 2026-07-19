@@ -75,3 +75,7 @@ export const formatTools = (tools) => {
   }));
   return _tools.map(tool => `${tool.name}: ${tool.description}`).join('\n');
 }
+
+export const formateObject = (obj) => {
+  return Object.entries(obj).map(([key, value]) => `${key}:${value}`).join('\n')
+}
