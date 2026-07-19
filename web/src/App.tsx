@@ -41,7 +41,7 @@ const tabs: Array<{ id: TabId; label: string; icon: typeof MessageSquareText }> 
   { id: "tools", label: "工具调用", icon: Hammer },
   { id: "rag", label: "RAG 问答", icon: Database },
   { id: "graph", label: "工作流", icon: GitBranch },
-  // { id: "approval", label: "人工审批", icon: Workflow },
+  { id: "approval", label: "人工审批", icon: Workflow },
 ];
 
 function useApiState() {

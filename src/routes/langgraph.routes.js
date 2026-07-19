@@ -28,11 +28,11 @@
  * 3. 添加连线
  * 
 */
-import { Annotation, END, MemorySaver, START, StateGraph } from '@langchain/langgraph';
+import { Annotation, END, MemorySaver, START, StateGraph, interrupt, Command } from '@langchain/langgraph';
 import { Router } from "express"; 
 import { asyncRoutes } from "../shared/async-route.js";
 
-import { threadInputSchema } from '../shared/validation.js';
+import { threadInputSchema, approvalInputSchema, approvalResumeSchema } from '../shared/validation.js';
 
 import { classifyTicket } from '../ai/structured.js';
 
@@ -40,6 +40,7 @@ import { getChatModel } from '../ai/models.js';
 import { HumanMessage, SystemMessage } from '@langchain/core/messages';
 
 import { formateObject, formateConveration } from '../ai/tools.js';
+import { stat } from 'fs';
 
 export const langgraphRouter = Router();
 
@@ -230,3 +231,108 @@ langgraphRouter.get(
     })
   })
 )
+// 人工审批
+/**
+ * 1. 一个 langGraph
+ * 2. 暂停： interrupt
+ * 3. 恢复流程：  Command
+ * 4. memorySave
+ * 
+ * 步骤：
+ * 1. 结构/返回数据
+ * 2. 定流程
+ * 3. 执行流程
+ * 
+ * 两个接口：
+ *  1. 启动审批
+ *  2. 批准/拒绝
+*/
+const overwrite = () => ({
+  // left: 旧值
+  // right: 新值
+  value: (left, right) => right
+})
+// 工作流
+const approvalState = Annotation.Root({
+  request: Annotation(),
+  // 草稿
+  draft: Annotation(),
+  // 批准/拒绝
+  approved: Annotation({
+    ...overwrite(),
+    default: () => false
+  }),
+  final: Annotation(),
+});
+
+const approvalMemory = new MemorySaver();
+
+const approvalGraph = new StateGraph(approvalState)
+  .addNode('create_draft', async (state) => ({
+    draft: `拟执行操作：${state.request}`
+  }))
+  .addNode('review', async (state) => {
+    const review = interrupt({
+      draft: state.draft,
+      question: "是否审批通过？"
+    })
+    return {
+      approved: review.approved,
+      draft: review.editedDraft ?? state.draft
+    }
+  })
+  .addNode('finish', async(state) => ({
+    final: state.approved ? `已批准并执行：${state.draft}` : `已拒绝：${state.draft}`,
+  }))
+  .addEdge(START, 'create_draft')
+  .addEdge('create_draft' , 'review')
+  .addEdge('review', 'finish')
+  .addEdge('finish', END)
+  .compile({ checkpointer: approvalMemory })
+
+
+// 启动审批
+langgraphRouter.post(
+  '/approval/start',
+  asyncRoutes(async (req, res) => {
+    // 限制用户输入
+    const body = approvalInputSchema.parse(req.body);
+    const config = { configurable: { thread_id: body.threadId } };
+    const result = await approvalGraph.invoke({request: body.request},config);
+
+    res.json({
+      ok: true,
+      data: {
+        output: formateObject(result)
+      }
+    })
+  })
+)
+
+// 人工审核 - 拒绝 | 批准
+langgraphRouter.post(
+  '/approval/resume',
+  asyncRoutes(async (req, res) => {
+    // 限制用户输入
+    const body = approvalResumeSchema.parse(req.body);
+    const config = { configurable: { thread_id: body.threadId } };
+    // 启动流程 Command
+    const result = await approvalGraph.invoke(
+      new Command({
+        resume: {
+          approved: body.approved,
+          editedDraft: body.editedDraft
+        }
+      }),
+      config
+    );
+    res.json({
+      ok: true,
+      data: {
+        threadId: body.threadId,
+        output: formateObject(result)
+      }
+    })
+  })
+)
+
